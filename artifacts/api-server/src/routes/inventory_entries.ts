@@ -130,7 +130,8 @@ router.post("/inventory-entries", requireAuth, requireAdmin, async (req, res): P
 // GET /inventory-entries?productId=X
 router.get("/inventory-entries", requireAuth, requireAdmin, async (req, res): Promise<void> => {
   const productIdRaw = req.query.productId;
-  const productId = productIdRaw ? parseInt(Array.isArray(productIdRaw) ? productIdRaw[0] : productIdRaw, 10) : null;
+  const productIdValue = Array.isArray(productIdRaw) ? productIdRaw[0] : productIdRaw;
+  const productId = typeof productIdValue === "string" && productIdValue ? Number.parseInt(productIdValue, 10) : null;
 
   const rows = await db.select({
     id: inventoryEntriesTable.id,
