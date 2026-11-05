@@ -5,11 +5,12 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useForm } from "react-hook-form";
 import { useToast } from "@/hooks/use-toast";
-import { Store, Mail, ImagePlus, Trash2, Palette, RotateCcw, Send, Link2 } from "lucide-react";
+import { Store, Mail, ImagePlus, Trash2, Palette, RotateCcw, Send, Link2, Loader2 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { applyBrandColor, hexToHsl, hslStringToHex } from "@/lib/brand-color";
 import { useBrandSettings } from "@/hooks/use-brand-settings";
 import { Switch } from "@/components/ui/switch";
+import { customFetch } from "@workspace/api-client-react";
 
 // Preset palette for quick selection
 const PRESETS = [
@@ -110,6 +111,8 @@ export default function Configuracion() {
   // ── Email notification toggles ─────────────────────────────────────
   const [sendInvoiceEmail, setSendInvoiceEmail] = useState(true);
   const [sendPaymentLinkEmail, setSendPaymentLinkEmail] = useState(true);
+  const [testRecipient, setTestRecipient] = useState("");
+  const [isTestingEmail, setIsTestingEmail] = useState(false);
 
   useEffect(() => {
     if (settings) {
@@ -141,7 +144,7 @@ export default function Configuracion() {
   };
 
   // ── Settings form ────────────────────────────────────────────────
-  const { register, handleSubmit, reset } = useForm<SettingsInput>();
+  const { register, handleSubmit, reset, getValues } = useForm<SettingsInput>();
 
   useEffect(() => {
     if (settings) {
@@ -198,6 +201,40 @@ export default function Configuracion() {
         queryClient.invalidateQueries({ queryKey: getGetSettingsQueryKey() });
       },
     });
+  };
+
+  const handleTestEmail = async () => {
+    const recipient = testRecipient.trim();
+    if (!recipient) {
+      toast({ title: "Indica el correo destinatario", variant: "destructive" });
+      return;
+    }
+
+    const values = getValues();
+    setIsTestingEmail(true);
+    try {
+      await customFetch<{ message: string }>("/api/settings/test-email", {
+        method: "POST",
+        body: JSON.stringify({
+          recipient,
+          storeName: values.storeName,
+          smtpHost: values.smtpHost,
+          smtpPort: values.smtpPort,
+          smtpUser: values.smtpUser,
+          smtpPass: values.smtpPass,
+          smtpFrom: values.smtpFrom,
+        }),
+      });
+      toast({ title: "Correo de prueba enviado", description: `Enviado a ${recipient}.` });
+    } catch (error) {
+      toast({
+        title: "No se pudo enviar el correo",
+        description: error instanceof Error ? error.message : "Verifica la configuración SMTP.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsTestingEmail(false);
+    }
   };
 
   if (isLoading) return (
@@ -441,6 +478,32 @@ export default function Configuracion() {
             <div className="space-y-1.5">
               <label className="text-sm font-semibold">Remitente (From)</label>
               <Input {...register("smtpFrom")} placeholder="noreply@claudiavanegas.com" />
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="smtp-test-recipient" className="text-sm font-semibold">Correo destinatario de la prueba</label>
+              <Input
+                id="smtp-test-recipient"
+                type="email"
+                value={testRecipient}
+                onChange={(event) => setTestRecipient(event.target.value)}
+                placeholder="correo@ejemplo.com"
+                autoComplete="email"
+              />
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-muted-foreground">
+                La prueba usa los valores actuales del formulario, aunque aún no los hayas guardado.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleTestEmail}
+                disabled={isTestingEmail}
+                className="gap-2"
+              >
+                {isTestingEmail ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                {isTestingEmail ? "Enviando..." : "Enviar correo de prueba"}
+              </Button>
             </div>
           </CardContent>
         </Card>

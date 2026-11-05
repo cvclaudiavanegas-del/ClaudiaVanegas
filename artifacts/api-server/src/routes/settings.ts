@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { db, settingsTable } from "@workspace/db";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { eq } from "drizzle-orm";
+import nodemailer from "nodemailer";
 
 const router: IRouter = Router();
 
@@ -62,6 +63,73 @@ router.put("/settings", requireAuth, requireAdmin, async (req, res): Promise<voi
   const [updated] = await db.update(settingsTable).set(updates).where(eq(settingsTable.id, settings.id)).returning();
   const { smtpPass: __, ...safeSettings } = updated;
   res.json({ ...safeSettings, smtpPass: updated.smtpPass ? "••••••••" : null });
+});
+
+router.post("/settings/test-email", requireAuth, requireAdmin, async (req, res): Promise<void> => {
+  const settings = await getOrCreateSettings();
+  const body = req.body as Record<string, unknown>;
+  const recipient = typeof body.recipient === "string" ? body.recipient.trim() : "";
+
+  if (!recipient || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
+    res.status(400).json({ error: "Ingresa una dirección de correo válida para la prueba." });
+    return;
+  }
+
+  const smtpHost = typeof body.smtpHost === "string" ? body.smtpHost.trim() : settings.smtpHost;
+  const smtpUser = typeof body.smtpUser === "string" ? body.smtpUser.trim() : settings.smtpUser;
+  const smtpPass =
+    typeof body.smtpPass === "string" && body.smtpPass && body.smtpPass !== "••••••••"
+      ? body.smtpPass
+      : settings.smtpPass;
+  const smtpPortValue = body.smtpPort;
+  const smtpPort =
+    smtpPortValue == null || smtpPortValue === ""
+      ? 587
+      : Number(smtpPortValue);
+
+  if (!smtpHost || !smtpUser || !smtpPass) {
+    res.status(400).json({ error: "Completa el host, usuario y contraseña SMTP antes de probar." });
+    return;
+  }
+  if (!Number.isInteger(smtpPort) || smtpPort < 1 || smtpPort > 65535) {
+    res.status(400).json({ error: "El puerto SMTP debe estar entre 1 y 65535." });
+    return;
+  }
+
+  const storeName =
+    (typeof body.storeName === "string" && body.storeName.trim()) || settings.storeName;
+  const smtpFrom =
+    (typeof body.smtpFrom === "string" && body.smtpFrom.trim()) ||
+    smtpUser;
+  const transporter = nodemailer.createTransport({
+    host: smtpHost,
+    port: smtpPort,
+    secure: smtpPort === 465,
+    auth: { user: smtpUser, pass: smtpPass },
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 15_000,
+  });
+
+  try {
+    await transporter.sendMail({
+      from: { name: storeName, address: smtpFrom },
+      to: recipient,
+      subject: "Correo de prueba SMTP",
+      text: `Este es un correo de prueba de la configuración SMTP de ${storeName}.`,
+    });
+    res.json({ message: "Correo de prueba enviado." });
+  } catch (error) {
+    console.error(
+      "[settings] No se pudo enviar el correo de prueba SMTP:",
+      error instanceof Error ? error.message : error,
+    );
+    res.status(502).json({
+      error: "No se pudo enviar el correo de prueba. Verifica el servidor y las credenciales SMTP.",
+    });
+  } finally {
+    transporter.close();
+  }
 });
 
 export default router;
